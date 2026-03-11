@@ -17,8 +17,6 @@ fi
 CUR="$(pwd)"
 mkdir -p "$DEST"
 
-python -m pip install -U "huggingface-hub==0.35.3"
-
 for repo in \
   IPEC-COMMUNITY/libero_spatial_no_noops_1.0.0_lerobot \
   IPEC-COMMUNITY/libero_object_no_noops_1.0.0_lerobot \

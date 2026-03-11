@@ -39,7 +39,8 @@ from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, w
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, normalize_dotlist_args
 
 deepspeed_plugin = DeepSpeedPlugin()
-accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
+ga_steps = deepspeed_plugin.deepspeed_config.get("gradient_accumulation_steps", 1)
+accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin, gradient_accumulation_steps=ga_steps)
 accelerator.print(accelerator.state)
 
 # Sane Defaults
@@ -129,14 +130,16 @@ class VLATrainer(TrainerUtils):
         self.model = self.freeze_backbones(self.model, freeze_modules=freeze_modules)
         self.print_trainable_parameters(self.model)
 
-        self.model, self.optimizer, self.vla_train_dataloader = self.setup_distributed_training(
+        self.model, self.optimizer, self.vla_train_dataloader, self.lr_scheduler = self.setup_distributed_training(
             self.accelerator,
             self.model,
             self.optimizer,
             self.vla_train_dataloader,
+            self.lr_scheduler,
         )
 
-        self._init_wandb()
+        if self.config.use_wandb:
+            self._init_wandb()
 
     def _calculate_total_batch_size(self):
         """Calculate global batch size."""
@@ -149,12 +152,12 @@ class VLATrainer(TrainerUtils):
     def _init_wandb(self):
         """Initialize Weights & Biases."""
         if self.accelerator.is_main_process:
+            print(self.config.run_id, self.config.wandb_project, self.config.wandb_entity)
             wandb.init(
                 name=self.config.run_id,
                 dir=os.path.join(self.config.output_dir, "wandb"),
                 project=self.config.wandb_project,
                 entity=self.config.wandb_entity,
-                group="vla-train",
             )
 
     def _init_checkpointing(self):
@@ -238,7 +241,8 @@ class VLATrainer(TrainerUtils):
         if self.completed_steps % self.config.trainer.logging_frequency == 0 and dist.get_rank() == 0:
             metrics["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
             metrics["epoch"] = round(self.completed_steps / len(self.vla_train_dataloader), 2)
-            wandb.log(metrics, step=self.completed_steps)
+            if self.config.use_wandb:
+                wandb.log(metrics, step=self.completed_steps)
             logger.info(f"Step {self.completed_steps}, Loss: {metrics})")
 
     def _create_data_iterators(self):
@@ -341,7 +345,7 @@ class VLATrainer(TrainerUtils):
 
             self.accelerator.backward(total_loss)
 
-            if self.config.trainer.gradient_clipping is not None:
+            if self.config.trainer.gradient_clipping is not None and self.accelerator.sync_gradients:
                 self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.trainer.gradient_clipping)
 
             self.optimizer.step()
@@ -368,7 +372,7 @@ class VLATrainer(TrainerUtils):
                 raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
             logger.info(f"Training complete. Final model saved at {final_checkpoint}")
 
-        if self.accelerator.is_main_process:
+        if self.accelerator.is_main_process and self.config.use_wandb:
             wandb.finish()
 
         self.accelerator.wait_for_everyone()
@@ -382,6 +386,8 @@ def main(cfg) -> None:
 
     output_dir = setup_directories(cfg=cfg)
     vla = build_framework(cfg)
+    print(vla)
+    print(f"Model size: {sum(p.numel() for p in vla.parameters()) / 1e6:.2f}M parameters")
     vla_train_dataloader = prepare_data(cfg=cfg, accelerator=accelerator, output_dir=output_dir)
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(model=vla, cfg=cfg)
 

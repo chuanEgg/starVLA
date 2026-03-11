@@ -1,18 +1,19 @@
-run_id: starvla
-run_root_dir: results/Checkpoints
+run_id: 0311_libero_test_qwenpi_0.8b
+run_root_dir: /tmp2/chuan/starVLA_results
 seed: 42
 trackers: [jsonl, wandb]
-wandb_entity: your_wandb_entity
-wandb_project: llavavla
+wandb_entity: chuan53-national-taiwan-university
+wandb_project: qwen3.5_vla_libero_test
 is_debug: false
+use_wandb: true
 
 
 framework:
   name: QwenGR00T
   qwenvl:
-    base_vlm: ./playground/Pretrained_models/Qwen2.5-VL-3B-Instruct-Action
+    base_vlm: /tmp2/chuan/Qwen3.5-0.8B
     attn_implementation: flash_attention_2
-    vl_hidden_dim: 2048
+    vl_hidden_dim: 2048 # This will be overwritten when loading the pretrained model anyway
   dino:
     dino_backbone: dinov2_vits14
   action_model:
@@ -63,7 +64,7 @@ datasets:
   vla_data:
     dataset_py: lerobot_datasets
     data_root_dir: playground/Datasets/LEROBOT_LIBERO_DATA
-    data_mix: libero_all # libero_goal
+    data_mix: libero_goal # libero_all
     action_type: delta_qpos
     sequential_step_sampling: False
     CoT_prompt: "Your task is {instruction}. To identify the key objects for your task. Locate their bounding boxes in [x1,y1,x2,y2] format."
@@ -97,7 +98,7 @@ trainer:
   weight_decay: 0.0
   logging_frequency: 10
   gradient_clipping: 1.0
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 8
 
   optimizer:
     name: AdamW
